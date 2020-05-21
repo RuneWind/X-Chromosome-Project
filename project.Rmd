@@ -1,0 +1,512 @@
+---
+title: "Population Genomics Project"
+author: "Rune Wind"
+date: "4/29/2020"
+output: html_document
+---
+
+```{r, include=FALSE}
+library(plyr)
+library(tidyverse)
+library(rehh)
+library(ggrepel)
+
+# Load saved data
+load("scans.RData")
+load("fst.RData")
+load("ihs.RData")
+```
+
+
+```{r}
+metaData <- read.csv(file = "data/metadata.txt", sep = "\t")
+metaData <- metaData[ ,2:3]
+colnames(metaData) <- c("population", "region")
+
+snps <- read.csv(file = "data/snps_filtered.txt", sep = "\t", header = F)
+colnames(snps) <- c("id", "chr", "position", "ancestral", "derived")
+```
+
+
+```{r}
+# Read data
+africa <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_AF.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+america <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_AM.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+siberia <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_CAS.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+east_asia <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_EA.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+oceania <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_O.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+south_asia <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_SA.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+west_eurasia <- data2haplohh(hap_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/genotypes_WE.dms",
+                       map_file="/Users/runewind/Documents/Skole/Uni/S8/Populationsgenetik/data/snps_filtered.txt",
+                       allele_coding="map", 
+                       min_perc_geno.mrk=100,
+                       min_perc_geno.hap=100,
+                       haplotype.in.columns=TRUE,
+                       chr.name="X")
+
+af_df <- scan_hh(africa)
+am_df <- scan_hh(america)
+si_df <- scan_hh(siberia)
+ea_df <- scan_hh(east_asia)
+oc_df <- scan_hh(oceania)
+sa_df <- scan_hh(south_asia)
+we_df <- scan_hh(west_eurasia)
+```
+
+
+```{r}
+# Function for calculating fst from allele frequencies of two subpopulations
+calc_fst <- function(subA, subB, windowSize, stepSize){
+  df <- inner_join(subA, subB, by="POSITION")
+  df <- df %>% mutate(H_T = 2 * ((df$FREQ_A.x + df$FREQ_A.y) / 2) * ((df$FREQ_D.x + df$FREQ_D.y) / 2),
+                      H_S = ((2 * df$FREQ_A.x * df$FREQ_D.x) + (2 * df$FREQ_A.y * df$FREQ_D.y)) / 2,
+                      F_ST = 1 - (H_S / H_T))
+  
+  return_df <- tibble(windowMid = numeric(), fst = numeric())
+  
+  for(i in seq(1, (nrow(df)-windowSize), stepSize)){
+    window <- df[i:(i+windowSize), ]
+    return_df <- return_df %>% add_row(windowMid = median(window$POSITION), fst = mean(window$F_ST, na.rm = TRUE))
+  }
+  return(return_df)
+}
+```
+
+
+```{r}
+# Call calc_fst function and save all fst values as one big dataframe
+populations <- c("af_df", "am_df", "si_df", "ea_df", "oc_df", "sa_df", "we_df")
+
+for (i in 1:length(populations)){
+  for (j in (i+1):length(populations)){
+    fst_values <- calc_fst(get(populations[i]), get(populations[j]), 100, 50)
+    colnames(fst_values)[2] <- paste0(substr(populations[i], 1, 2) , "_", substr(populations[j], 1, 2))
+    assign(x = paste0(populations[i], "_", populations[j]), fst_values)
+    print(paste0(i, j, "   OK"))
+  }
+}
+
+fst_df <- join_all(dfs=list(af_df_am_df, af_df_si_df, af_df_ea_df, af_df_oc_df, af_df_sa_df, af_df_we_df, am_df_si_df, am_df_ea_df,
+                            am_df_oc_df, am_df_sa_df, am_df_we_df, si_df_ea_df, si_df_oc_df, si_df_sa_df, si_df_we_df, ea_df_oc_df,
+                            ea_df_sa_df, ea_df_we_df, oc_df_sa_df, oc_df_we_df, sa_df_we_df),
+                   by="windowMid", type="full")
+
+save(fst_df, file="fst.RData")
+```
+
+```{r}
+# Prepare fst_df for use with foverlaps
+fst_df$end <- fst_df$windowMid
+# Read in annotation
+annotation_match <- foverlaps(x = as.data.table(fst_df), y = annotation, by.x = c("windowMid", "end"), by.y = c("start", "end"))
+
+# Find top 10 snps that has an annotation
+af_ea_top10 <- annotation_match %>%
+  drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  slice(which.max(af_ea)) %>%
+  dplyr::arrange(desc(af_ea)) %>%
+  head(10)
+
+af_we_top10 <- annotation_match %>%
+  drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  slice(which.max(af_we)) %>%
+  dplyr::arrange(desc(af_we)) %>%
+  head(10)
+
+ea_we_top10 <- annotation_match %>%
+  drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  slice(which.max(ea_we)) %>%
+  dplyr::arrange(desc(ea_we)) %>%
+  head(10)
+```
+
+
+
+```{r}
+# Extract data for plotting
+plot_df <- pivot_longer(data = fst_df,
+                       cols = c("af_am", "af_si", "af_ea", "af_oc", "af_sa", "af_we", "am_si", "am_ea",
+                                "am_oc", "am_sa", "am_we", "si_ea", "si_oc", "si_sa", "si_we", "ea_oc",
+                                "ea_sa", "ea_we", "oc_sa", "oc_we", "sa_we"),
+                       names_to = "populations",
+                       values_to = "fst") %>%
+  filter(populations %in% c("af_ea", "af_we", "ea_we"))
+
+# Add column to how if SNP is in top10 or not (1 or 0)
+plot_df$top10 <- 0
+for (i in 1:nrow(plot_df)){
+  if (plot_df$populations[i] == "af_ea" & plot_df$windowMid[i] %in% af_ea_top10$windowMid){
+    plot_df$top10[i] <- 1
+  }
+  if (plot_df$populations[i] == "af_we" & plot_df$windowMid[i] %in% af_we_top10$windowMid){
+    plot_df$top10[i] <- 1
+  }
+  if (plot_df$populations[i] == "ea_we" & plot_df$windowMid[i] %in% ea_we_top10$windowMid){
+    plot_df$top10[i] <- 1
+  }
+}
+
+# Data required to annotate gene names on plot
+ann_text <- data.frame(gene_name = c(af_ea_top10$gene_name, af_we_top10$gene_name, ea_we_top10$gene_name),
+                       x = c(af_ea_top10$windowMid, af_we_top10$windowMid, ea_we_top10$windowMid),
+                       y = c(af_ea_top10$af_ea, af_we_top10$af_we, ea_we_top10$ea_we),
+                       populations = c(rep("af_ea", 10), rep("af_we", 10), rep("ea_we", 10)))
+
+# Plotting Fst
+ggplot(data = plot_df) +
+  geom_point(mapping = aes(x = windowMid, y = fst, col = as.factor(top10), alpha = as.factor(top10))) +
+  facet_wrap(~populations, ncol=1) +
+  xlab("Window position (middle)") +
+  ylab("Fst value") +
+  geom_text(data = ann_text, mapping = aes(x = x, y = y, label = gene_name), hjust = 0, nudge_x = 500000) +
+  guides(col = guide_legend(title = "In Fst top 10"), alpha = guide_legend(title = "In Fst top 10")) +
+  theme_light()
+{}
+```
+
+
+
+```{r}
+af_ihs <- ihh2ihs(af_df, freqbin = 0.05)
+ea_ihs <- ihh2ihs(ea_df, freqbin = 0.05)
+we_ihs <- ihh2ihs(we_df, freqbin = 0.05)
+
+full_ihs <- full_join(we_ihs$ihs,
+                      full_join(af_ihs$ihs, ea_ihs$ihs, by = "POSITION", suffix = c("_af", "_ea")),
+                      by="POSITION", )
+full_ihs <- select(full_ihs, -c("CHR", "CHR_af", "CHR_ea"))
+colnames(full_ihs)[2] <- "IHS_we"
+colnames(full_ihs)[3] <- "LOGPVALUE_we"
+
+ihs_plot <- pivot_longer(data = full_ihs, cols = c("IHS_we", "IHS_af", "IHS_ea"), names_to = "populations", values_to = "ihs", names_prefix = "IHS_")
+ihs_plot <- pivot_longer(data = ihs_plot, cols = c("LOGPVALUE_we", "LOGPVALUE_af", "LOGPVALUE_ea"), values_to = "LOGPVALUE")
+ihs_plot <- select(ihs_plot, -c("name"))
+ihs_plot <- ihs_plot %>% drop_na(ihs) %>% drop_na(LOGPVALUE)
+
+ihs_plot$end <- ihs_plot$POSITION
+
+ihs_ann <- foverlaps(x = as.data.table(ihs_plot), y = annotation, by.x = c("POSITION", "end"), by.y = c("start", "end"))
+
+ihs_plot <- left_join(x = ihs_plot, y = select(ihs_ann, c("gene_name", "POSITION")), by = "POSITION")
+ihs_plot <- ihs_plot %>% drop_na(gene_name)
+
+# Calculate quantiles and top 10 genes for each population
+af_top_ihs <- ihs_plot %>%
+  filter(populations == "af") %>%
+  drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  summarise(ntop = sum(LOGPVALUE >= 3),
+            position = POSITION[1]) %>%
+  dplyr::arrange(desc(ntop)) %>%
+  head(10)
+
+ea_top_ihs <- ihs_plot %>%
+  filter(populations == "ea") %>%
+  #drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  summarise(ntop = sum(LOGPVALUE >= 3),
+            position = POSITION[1]) %>%
+  dplyr::arrange(desc(ntop)) %>%
+  head(10)
+
+we_top_ihs <- ihs_plot %>%
+  filter(populations == "we") %>%
+  #drop_na(gene_name) %>%
+  group_by(gene_name) %>%
+  summarise(ntop = sum(LOGPVALUE >= 3),
+            position = POSITION[1]) %>%
+  dplyr::arrange(desc(ntop)) %>%
+  head(10)
+
+ihs_plot <- ihs_plot %>% distinct()
+
+ihs_plot$in_top10 = 0
+for (i in 1:nrow(ihs_plot)){
+  if (ihs_plot$populations[i] == "af" & ihs_plot$gene_name[i] %in% af_top_ihs$gene_name){
+    ihs_plot$in_top10[i] <- 1
+  }
+  else if (ihs_plot$populations[i] == "ea" & ihs_plot$gene_name[i] %in% ea_top_ihs$gene_name){
+    ihs_plot$in_top10[i] <- 1
+  }
+  else if (ihs_plot$populations[i] == "we" & ihs_plot$gene_name[i] %in% we_top_ihs$gene_name){
+    ihs_plot$in_top10[i] <- 1
+  }
+  if (i %% 2500 == 0){
+    cat(i %/% 2500)
+  }
+}
+# Save data because it takes a long time to make
+save(ihs_plot, file = "ihs.RData")
+
+
+ihs_text <- data.frame(gene_name = c(af_top_ihs$gene_name, ea_top_ihs$gene_name, we_top_ihs$gene_name),
+                       x = c(af_top_ihs$position, ea_top_ihs$position, we_top_ihs$position),
+                       populations = c(rep("af", 10), rep("ea", 10), rep("we", 10)))
+temp <- ihs_text %>% group_by(populations, gene_name) %>% summarise(y = max(ihs_ann$ihs[ihs_ann$gene_name == gene_name], na.rm = TRUE))
+ihs_text$y <- temp$y
+
+ggplot(data = ihs_plot) +
+  geom_point(mapping = aes(x = POSITION, y = ihs, col = as.factor(in_top10))) +
+  geom_point(data = subset(ihs_plot, in_top10 == 1), aes(x = POSITION, y = ihs, col = as.factor(in_top10))) +
+  ylab("iHS") +
+  xlab("Position") +
+  guides(col = guide_legend(title = "In iHS top 10")) +
+  facet_wrap(~populations, ncol=1) +
+  geom_text(data = ihs_text, mapping = aes(x = x, y = y, label = gene_name), nudge_y = 1) +
+  theme_light()
+{}
+```
+
+
+```{r}
+# Remove pseudoautosomal regions of X chromosome
+af_xp <- af_df %>% filter(POSITION < 155701383) %>% filter(POSITION > 2781479)
+ea_xp <- ea_df %>% filter(POSITION < 155701383) %>% filter(POSITION > 2781479)
+we_xp <- we_df %>% filter(POSITION < 155701383) %>% filter(POSITION > 2781479)
+
+# Perform XP-EHH scan between pairs of populations
+xp_af_ea <- ies2xpehh(scan_pop1=af_xp, scan_pop2=ea_xp, popname1="Africa", popname2="East Asia")
+xp_af_we <- ies2xpehh(scan_pop1=af_xp, scan_pop2=we_xp, popname1="Africa", popname2="West Eurasia")
+xp_ea_we <- ies2xpehh(scan_pop1=ea_xp, scan_pop2=we_xp, popname1="East Asia", popname2="West Eurasia")
+
+# Remove Chromosome column
+xp_af_ea <- select(xp_af_ea, -c("CHR"))
+xp_af_we <- select(xp_af_we, -c("CHR"))
+xp_ea_we <- select(xp_ea_we, -c("CHR"))
+
+colnames(xp_af_ea)[2] <- "XPEHH_af_ea"
+colnames(xp_af_ea)[3] <- "LOGPVALUE_af_ea"
+colnames(xp_af_we)[2] <- "XPEHH_af_we"
+colnames(xp_af_we)[3] <- "LOGPVALUE_af_we"
+colnames(xp_ea_we)[2] <- "XPEHH_ea_we"
+colnames(xp_ea_we)[3] <- "LOGPVALUE_ea_we"
+
+xp_plot <- full_join(xp_af_ea,
+                     full_join(xp_af_we, xp_ea_we, by = "POSITION"),
+                     by = "POSITION")
+xp_plot$END <- xp_plot$POSITION
+
+xp_ann <- foverlaps(x = as.data.table(xp_plot), y = annotation, by.x = c("POSITION", "END"), by.y = c("start", "end"))
+
+xp_plot <- left_join(x = xp_plot, y = select(xp_ann, c("gene_name", "POSITION")), by = "POSITION")
+
+xp_plot <- pivot_longer(xp_plot, cols = c("XPEHH_af_ea", "XPEHH_af_we", "XPEHH_ea_we"), names_to = "populations", names_prefix = "XPEHH_", values_to = "EHH")
+xp_plot <- pivot_longer(xp_plot, cols = c("LOGPVALUE_af_ea", "LOGPVALUE_af_we", "LOGPVALUE_ea_we"), values_to = "LOGPVALUE")
+xp_plot <- select(xp_plot, -c("name"))
+
+
+af_ea_ehh_top <- xp_plot %>%
+  drop_na(gene_name) %>%
+  filter(populations == "af_ea") %>%
+  group_by(gene_name) %>%
+  slice(which.max(LOGPVALUE)) %>%
+  dplyr::arrange(desc(LOGPVALUE)) %>%
+  head(10)
+
+af_we_ehh_top <- xp_plot %>%
+  drop_na(gene_name) %>%
+  filter(populations == "af_we") %>%
+  group_by(gene_name) %>%
+  slice(which.max(LOGPVALUE)) %>%
+  dplyr::arrange(desc(LOGPVALUE)) %>%
+  head(10)
+
+ea_we_ehh_top <- xp_plot %>%
+  drop_na(gene_name) %>%
+  filter(populations == "ea_we") %>%
+  group_by(gene_name) %>%
+  slice(which.max(LOGPVALUE)) %>%
+  dplyr::arrange(desc(LOGPVALUE)) %>%
+  head(10)
+
+xp_plot <- xp_plot %>% drop_na(gene_name) %>% distinct()
+
+xp_plot$top10 <- 0
+for (i in 1:nrow(xp_plot)){
+  if (xp_plot$populations[i] == "af_ea" & xp_plot$LOGPVALUE[i] %in% af_ea_ehh_top$LOGPVALUE){
+    xp_plot$top10[i] <- 1
+  }
+  else if (xp_plot$populations[i] == "af_we" & xp_plot$LOGPVALUE[i] %in% af_we_ehh_top$LOGPVALUE){
+    xp_plot$top10[i] <- 1
+  }
+  else if (xp_plot$populations[i] == "ea_we" & xp_plot$LOGPVALUE[i] %in% ea_we_ehh_top$LOGPVALUE){
+    xp_plot$top10[i] <- 1
+  }
+  if (i %% 15000 == 0){
+    cat(i / 15000)
+  }
+}
+
+xp_text <- data.frame(gene_name = c(af_ea_ehh_top$gene_name, af_we_ehh_top$gene_name, ea_we_ehh_top$gene_name),
+                       x = c(af_ea_ehh_top$POSITION, af_we_ehh_top$POSITION, ea_we_ehh_top$POSITION),
+                       y = c(af_ea_ehh_top$EHH, af_we_ehh_top$EHH, ea_we_ehh_top$EHH),
+                       populations = c(rep("af_ea", 10), rep("af_we", 10), rep("ea_we", 10)))
+
+ggplot(data = xp_plot) +
+  geom_point(mapping = aes(x = POSITION, y = EHH, col = as.factor(top10))) +
+  geom_point(data = subset(xp_plot, top10 == 1), aes(x = POSITION, y = EHH, col = as.factor(top10))) +
+  ylab("XP-EHH") +
+  xlab("Position") +
+  guides(col = guide_legend(title = "In XP-EHH top 10")) +
+  facet_wrap(~populations, ncol=1) +
+  geom_text(data = xp_text, mapping = aes(x = x, y = y, label = gene_name), hjust = 0, position = position_jitter(width = 0, height = 0.75)) +
+  theme_light()
+{}
+```
+
+Intersect analysis
+```{r}
+# See if any of the same genes were identified
+ann_text[ann_text$gene_name %in% xp_text$gene_name,]
+```
+
+
+Additional: diversity along X-chr
+```{r}
+head(af_df)
+diversity.stats()
+
+calc_diversity <- function(df){
+  df <- df %>% mutate(He = 2 * df$FREQ_A * df$FREQ_D)
+  
+  return_df <- tibble(windowMid = numeric(), He = numeric())
+  
+  for (i in seq(1, (nrow(df)-100), 10)){
+    window <- df[i:(i+100), ]
+    return_df <- return_df %>% add_row(windowMid = median(window$POSITION), He = mean(window$He, na.rm = TRUE))
+    if (i %% (nrow(df)%/%100) == 0){
+      cat(i %/% (nrow(df)%/%100))
+    }
+  }
+  return(return_df)
+}
+
+af_diversity <- calc_diversity(af_df)
+ea_diversity <- calc_diversity(ea_df)
+we_diversity <- calc_diversity(we_df)
+
+colnames(af_diversity)[2] <- "He_af"
+colnames(ea_diversity)[2] <- "He_ea"
+colnames(we_diversity)[2] <- "He_we"
+
+diversity <- full_join(af_diversity,
+                       full_join(ea_diversity, we_diversity, by = "windowMid"),
+                       by = "windowMid")
+
+diversity <- pivot_longer(diversity, cols = c("He_af", "He_ea", "He_we"), names_to = "populations", names_prefix = "He_", values_to = "He")
+
+# Find top 10
+af_top_he <- diversity %>%
+  filter(populations == "af") %>%
+  dplyr::arrange(He) %>%
+  head(10)
+
+ea_top_he <- diversity %>%
+  filter(populations == "ea") %>%
+  dplyr::arrange(He) %>%
+  head(10)
+
+we_top_he <- diversity %>%
+  filter(populations == "we") %>%
+  dplyr::arrange(He) %>%
+  head(10)
+
+
+diversity$top10 = 0
+for (i in 1:nrow(diversity)){
+  if (diversity$populations[i] == "af" & diversity$windowMid[i] %in% af_top_he$windowMid){
+    diversity$top10[i] <- 1
+  }
+  else if (diversity$populations[i] == "ea" & diversity$windowMid[i] %in% ea_top_he$windowMid){
+    diversity$top10[i] <- 1
+  }
+  else if (diversity$populations[i] == "we" & diversity$windowMid[i] %in% we_top_he$windowMid){
+    diversity$top10[i] <- 1
+  }
+  if (i %% 15000 == 0){
+    cat(i / 15000)
+  }
+}
+
+
+ggplot(data = diversity) +
+  geom_point(mapping = aes(x = windowMid, y = He, col = as.factor(top10)), size = .7) +
+  geom_point(data = subset(diversity, top10 == 1), aes(x = windowMid, y = He, col = as.factor(top10))) +
+  guides(col = guide_legend(title = "In He top 10")) +
+  xlab("SNP position (middle of window)") +
+  ylab("Expected Heterozygosity (He)") +
+  facet_wrap(~populations, ncol = 1)
+
+
+diversity$end <- diversity$windowMid
+diversity_ann <- foverlaps(x = as.data.table(diversity[diversity$top10 == 1, ]), y = annotation, by.x = c("windowMid", "end"), by.y = c("start", "end"))
+
+div_10_ann <- diversity_ann %>% drop_na(gene_name) %>% group_by(populations, gene_name) %>% summarise(He = min(He))
+```
+
+```{r}
+intersect_all <- tibble(gene_name = c(div_10_ann$gene_name,
+                     af_ea_top10$gene_name, af_we_top10$gene_name, ea_we_top10$gene_name,
+                     af_ea_ehh_top$gene_name, af_we_ehh_top$gene_name, ea_we_ehh_top$gene_name,
+                     af_top_ihs$gene_name, ea_top_ihs$gene_name, we_top_ihs$gene_name))
+intersect_all <-intersect_all %>% group_by(gene_name) %>% summarise(n = n())
+
+ggplot(data = intersect_all) +
+  geom_col(mapping = aes(x = gene_name, y = n), fill="firebrick") +
+  xlab("Gene name") +
+  ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  theme_light()
+```
+
+
+
+
+
+
